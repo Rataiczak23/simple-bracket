@@ -2,20 +2,41 @@ export type TournamentFormat = "single" | "double";
 export type TournamentStatus = "setup" | "in_progress" | "completed";
 export type BracketKind = "winners" | "losers" | "grand_final";
 
+/** Public-facing account info — never includes the password hash. */
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  display_name: string;
+}
+
 export interface Tournament {
   id: string;
   name: string;
   format: TournamentFormat;
   status: TournamentStatus;
   winner_id: string | null;
+  created_by: string | null;
   created_at: string;
 }
 
 export interface Participant {
   id: string;
   tournament_id: string;
+  user_id: string | null;
   name: string;
   seed: number | null;
+  created_at: string;
+}
+
+/** A saved standing for one player in one completed tournament. */
+export interface Result {
+  id: string;
+  tournament_id: string;
+  user_id: string;
+  placement: number;
+  points: number;
+  matches_won: number;
   created_at: string;
 }
 

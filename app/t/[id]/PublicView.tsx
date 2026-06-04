@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useLiveTournament } from "@/components/useLiveTournament";
 import BracketView from "@/components/BracketView";
 import {
@@ -10,14 +11,16 @@ import {
   ParticipantList,
   StatusBadge,
 } from "@/components/TournamentBits";
-import type { TournamentBundle } from "@/lib/types";
+import type { AuthUser, TournamentBundle } from "@/lib/types";
 
 export default function PublicView({
   id,
   initial,
+  currentUser,
 }: {
   id: string;
   initial: TournamentBundle;
+  currentUser: AuthUser | null;
 }) {
   const { bundle } = useLiveTournament(id, initial);
   const [shareUrl, setShareUrl] = useState("");
@@ -49,7 +52,11 @@ export default function PublicView({
           {tournament.status === "setup" && (
             <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 space-y-3">
               <h2 className="font-semibold">Join this tournament</h2>
-              <JoinForm tournamentId={id} />
+              <JoinForm
+                tournamentId={id}
+                currentUser={currentUser}
+                alreadyJoined={participants.some((p) => p.user_id === currentUser?.id)}
+              />
             </div>
           )}
 
@@ -81,27 +88,47 @@ export default function PublicView({
   );
 }
 
-function JoinForm({ tournamentId }: { tournamentId: string }) {
-  const [name, setName] = useState("");
+function JoinForm({
+  tournamentId,
+  currentUser,
+  alreadyJoined,
+}: {
+  tournamentId: string;
+  currentUser: AuthUser | null;
+  alreadyJoined: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [joined, setJoined] = useState(false);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  if (!currentUser) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs text-slate-400">Sign in to join this tournament.</p>
+        <Link
+          href={`/login?next=${encodeURIComponent(`/t/${tournamentId}`)}`}
+          className="block w-full text-center rounded-md bg-emerald-600 hover:bg-emerald-500 px-3 py-2 text-sm font-semibold"
+        >
+          Sign in to join
+        </Link>
+      </div>
+    );
+  }
+
+  if (alreadyJoined) {
+    return <p className="text-sm text-emerald-400">You&apos;re in! 🎯 Waiting for the host to start.</p>;
+  }
+
+  async function join() {
     setBusy(true);
     setError(null);
     try {
       const res = await fetch(`/api/tournaments/${tournamentId}/participants`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({}),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Could not join.");
-      setName("");
-      setJoined(true);
-      setTimeout(() => setJoined(false), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not join.");
     } finally {
@@ -110,24 +137,16 @@ function JoinForm({ tournamentId }: { tournamentId: string }) {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-2">
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        maxLength={40}
-        required
-        placeholder="Your name"
-        className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
-      />
+    <div className="space-y-2">
       {error && <p className="text-xs text-red-400">{error}</p>}
-      {joined && <p className="text-xs text-emerald-400">You&apos;re in! 🎯</p>}
       <button
-        type="submit"
+        type="button"
+        onClick={join}
         disabled={busy}
         className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 px-3 py-2 text-sm font-semibold"
       >
-        {busy ? "Joining…" : "Join as guest"}
+        {busy ? "Joining…" : `Join as ${currentUser.display_name}`}
       </button>
-    </form>
+    </div>
   );
 }

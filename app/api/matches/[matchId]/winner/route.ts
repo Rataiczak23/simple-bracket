@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { assertAdmin, errorResponse, tokenFromRequest, HttpError } from "@/lib/admin";
 import { applyWinner } from "@/lib/bracket";
-import type { Match } from "@/lib/types";
+import { computeResults } from "@/lib/rankings";
+import type { Match, Participant } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,20 @@ export async function POST(req: Request, { params }: { params: { matchId: string
         .from("tournaments")
         .update({ status: "completed", winner_id: champion })
         .eq("id", target.tournament_id);
+
+      // Save standings for the power rankings.
+      const { data: participants } = await supabase
+        .from("participants")
+        .select("*")
+        .eq("tournament_id", target.tournament_id)
+        .returns<Participant[]>();
+      const results = computeResults(participants ?? [], updated, champion).map((r) => ({
+        ...r,
+        tournament_id: target.tournament_id,
+      }));
+      if (results.length > 0) {
+        await supabase.from("results").upsert(results, { onConflict: "tournament_id,user_id" });
+      }
     }
 
     return NextResponse.json({ ok: true, champion: champion ?? null });

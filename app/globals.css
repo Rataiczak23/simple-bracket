@@ -10,6 +10,11 @@ body {
   @apply bg-slate-950 text-slate-100 antialiased;
 }
 
+/* Shared text input for the auth forms */
+.auth-input {
+  @apply w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600;
+}
+
 /* Thin scrollbars for the horizontally-scrolling bracket */
 .bracket-scroll::-webkit-scrollbar {
   height: 8px;

@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { HttpError, errorResponse } from "@/lib/admin";
+import { requireUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 // POST /api/tournaments  { name, format } -> create a tournament + admin secret.
 export async function POST(req: Request) {
   try {
+    const user = await requireUser();
     const { name, format } = await req.json();
 
     const cleanName = typeof name === "string" ? name.trim() : "";
@@ -19,7 +21,7 @@ export async function POST(req: Request) {
     const supabase = createServiceClient();
     const { data: tournament, error: tErr } = await supabase
       .from("tournaments")
-      .insert({ name: cleanName, format, status: "setup" })
+      .insert({ name: cleanName, format, status: "setup", created_by: user.id })
       .select("id")
       .single();
     if (tErr || !tournament) throw new HttpError(500, "Could not create tournament.");

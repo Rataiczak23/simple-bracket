@@ -1,11 +1,13 @@
 # 🎯 Simple Bracket
 
 Dead-simple **darts** tournament brackets. A competitor to Challonge, stripped down to
-the essentials: create a single- or double-elimination tournament, share a link, and let
-players join as guests — no accounts. Deploys to a free Vercel instance.
+the essentials: create a single- or double-elimination tournament, share a link, let
+signed-in players join, and every result feeds a site-wide power-rankings board. Deploys
+to a free Vercel instance.
 
+- **Accounts** — username/password sign-in (log in by email); players must sign in to play
 - **Single & double elimination** (with automatic byes for non-power-of-2 fields)
-- **Guest entry** — players join with just a name, no sign-up
+- **Power rankings** — placement points across every completed tournament
 - **Link + secret** host model — one private admin link, one public share link
 - **Pick-a-winner** scoring — tap the winner, the bracket advances
 - **Live updates** via Supabase realtime
@@ -27,6 +29,10 @@ At [supabase.com](https://supabase.com), create a free project.
 Open your project's **SQL Editor → New query**, paste the contents of
 [`supabase/schema.sql`](supabase/schema.sql), and run it. This creates the tables, RLS
 policies, and realtime publication.
+
+> Already running an older version with data? Run
+> [`supabase/migration-auth-rankings.sql`](supabase/migration-auth-rankings.sql) instead —
+> it adds the accounts + rankings tables without dropping your tournaments.
 
 ### 3. Configure environment
 Copy `.env.local.example` to `.env.local` and fill in from **Project Settings → API**:
@@ -54,13 +60,26 @@ Open http://localhost:3000.
 
 | Page | Who | What |
 |------|-----|------|
-| `/` | anyone | Create a tournament (name + format) |
-| `/t/[id]` | public | Live bracket, player list, guest join (while open) |
-| `/t/[id]/manage#token=…` | host | Add/remove players, start, report winners, reset |
+| `/` | anyone | Create a tournament (requires sign-in) |
+| `/signup`, `/login` | anyone | Account: name, display name, email, password |
+| `/rankings` | public | Power rankings — placement points across all tournaments |
+| `/t/[id]` | public | Live bracket, player list, self-join (signed in, while open) |
+| `/t/[id]/manage#token=…` | host | Add players by email, start, report winners, reset |
+
+**Auth model.** Accounts live in a `users` table (passwords hashed with Node's `scrypt`);
+sign-in is email + password, with an opaque httpOnly session cookie backed by a `sessions`
+table. No Supabase Auth, no OAuth — one username/password method. The public bracket view
+stays open to everyone; creating and joining require an account so results can be linked.
+
+**Rankings.** When a tournament completes, each player's placement and points are saved to
+a `results` table (champion 100, runner-up 70, semifinal 40, quarterfinal 20, last-16 10,
+else 5). `/rankings` aggregates totals across all events. Resetting a bracket clears its
+saved results.
 
 The bracket engine lives in [`lib/bracket.ts`](lib/bracket.ts) — pure functions for
 generation and advancement, with a fixpoint that propagates byes through both the winners
 and losers brackets. Regression simulation: `npx tsx lib/bracket.test.mjs`.
 
 ## Out of scope (kept simple)
-Scores/legs/sets, seeding UI, round-robin, bracket-reset grand final, host dashboards.
+Scores/legs/sets, seeding UI, round-robin, bracket-reset grand final, host dashboards,
+password reset / email verification, OAuth or other sign-in methods.

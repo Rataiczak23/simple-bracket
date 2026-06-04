@@ -13,6 +13,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const { error: dErr } = await supabase.from("matches").delete().eq("tournament_id", params.id);
     if (dErr) throw new HttpError(500, "Could not clear the bracket.");
 
+    // Drop any saved standings — they'll be recomputed when it finishes again.
+    await supabase.from("results").delete().eq("tournament_id", params.id);
+
     const { error: uErr } = await supabase
       .from("tournaments")
       .update({ status: "setup", winner_id: null })

@@ -107,11 +107,15 @@ export default function ManagePage({ params }: { params: { id: string } }) {
           {tournament.status === "setup" && (
             <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 space-y-3">
               <h2 className="font-semibold">Add a player</h2>
+              <p className="text-xs text-slate-500">
+                Players join themselves with the share link, or add a registered player by their
+                account email.
+              </p>
               <AddPlayerForm
-                onAdd={(name) =>
+                onAdd={(email) =>
                   adminCall(`/api/tournaments/${id}/participants`, {
                     method: "POST",
-                    body: JSON.stringify({ name }),
+                    body: JSON.stringify({ email }),
                   })
                 }
                 busy={busy}
@@ -195,24 +199,24 @@ export default function ManagePage({ params }: { params: { id: string } }) {
   );
 }
 
-function AddPlayerForm({ onAdd, busy }: { onAdd: (name: string) => void; busy: boolean }) {
-  const [name, setName] = useState("");
+function AddPlayerForm({ onAdd, busy }: { onAdd: (email: string) => void; busy: boolean }) {
+  const [email, setEmail] = useState("");
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (name.trim()) {
-          onAdd(name.trim());
-          setName("");
+        if (email.trim()) {
+          onAdd(email.trim());
+          setEmail("");
         }
       }}
       className="flex gap-2"
     >
       <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        maxLength={40}
-        placeholder="Player name"
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="player@email.com"
         className="flex-1 rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
       />
       <button
