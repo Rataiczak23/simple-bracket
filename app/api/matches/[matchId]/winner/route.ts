@@ -4,6 +4,7 @@ import { assertAdmin, errorResponse, tokenFromRequest, HttpError } from "@/lib/a
 import { applyWinner } from "@/lib/bracket";
 import { computeResults } from "@/lib/rankings";
 import type { Match, Participant } from "@/lib/types";
+import { clientIpKey, enforceRateLimits, rateLimitKey } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,24 @@ export async function POST(req: Request, { params }: { params: { matchId: string
     }
 
     const supabase = createServiceClient();
+    const adminToken = tokenFromRequest(req);
+    const limited = await enforceRateLimits(req, [
+      {
+        name: "match-winner-ip",
+        key: clientIpKey(req),
+        limit: 120,
+        windowSec: 60,
+        message: "Too many winner updates. Slow down and try again.",
+      },
+      {
+        name: "match-winner-admin",
+        key: adminToken ? rateLimitKey("admin", adminToken) : null,
+        limit: 240,
+        windowSec: 300,
+        message: "Too many winner updates. Slow down and try again.",
+      },
+    ]);
+    if (limited) return limited;
 
     // Find which tournament this match belongs to, then authorize.
     const { data: target } = await supabase
@@ -25,7 +44,7 @@ export async function POST(req: Request, { params }: { params: { matchId: string
       .single<{ tournament_id: string }>();
     if (!target) throw new HttpError(404, "Match not found.");
 
-    await assertAdmin(supabase, target.tournament_id, tokenFromRequest(req));
+    await assertAdmin(supabase, target.tournament_id, adminToken);
 
     const { data: matches } = await supabase
       .from("matches")

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { HttpError, errorResponse } from "@/lib/admin";
 import { requireUser } from "@/lib/auth";
+import { clientIpKey, enforceRateLimits, rateLimitKey } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -9,6 +10,24 @@ export const runtime = "nodejs";
 export async function POST(req: Request) {
   try {
     const user = await requireUser();
+    const limited = await enforceRateLimits(req, [
+      {
+        name: "tournament-create-ip",
+        key: clientIpKey(req),
+        limit: 20,
+        windowSec: 3600,
+        message: "Too many tournament creations. Try again later.",
+      },
+      {
+        name: "tournament-create-user",
+        key: rateLimitKey("user", user.id),
+        limit: 10,
+        windowSec: 3600,
+        message: "Too many tournament creations. Try again later.",
+      },
+    ]);
+    if (limited) return limited;
+
     const { name, format } = await req.json();
 
     const cleanName = typeof name === "string" ? name.trim() : "";

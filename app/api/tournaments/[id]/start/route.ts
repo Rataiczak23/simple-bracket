@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { assertAdmin, errorResponse, tokenFromRequest, HttpError } from "@/lib/admin";
 import { generateBracket } from "@/lib/bracket";
 import type { Participant, Tournament } from "@/lib/types";
+import { clientIpKey, enforceRateLimits, rateLimitKey } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -10,7 +11,26 @@ export const runtime = "nodejs";
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
     const supabase = createServiceClient();
-    await assertAdmin(supabase, params.id, tokenFromRequest(req));
+    const adminToken = tokenFromRequest(req);
+    const limited = await enforceRateLimits(req, [
+      {
+        name: "tournament-start-ip",
+        key: clientIpKey(req),
+        limit: 10,
+        windowSec: 300,
+        message: "Too many start attempts. Try again in a few minutes.",
+      },
+      {
+        name: "tournament-start-admin",
+        key: adminToken ? rateLimitKey("admin", adminToken) : null,
+        limit: 10,
+        windowSec: 300,
+        message: "Too many start attempts. Try again in a few minutes.",
+      },
+    ]);
+    if (limited) return limited;
+
+    await assertAdmin(supabase, params.id, adminToken);
 
     const { data: tournament } = await supabase
       .from("tournaments")

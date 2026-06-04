@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { assertAdmin, errorResponse, tokenFromRequest, HttpError } from "@/lib/admin";
+import { clientIpKey, enforceRateLimits, rateLimitKey } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -11,7 +12,26 @@ export async function DELETE(
 ) {
   try {
     const supabase = createServiceClient();
-    await assertAdmin(supabase, params.id, tokenFromRequest(req));
+    const adminToken = tokenFromRequest(req);
+    const limited = await enforceRateLimits(req, [
+      {
+        name: "participants-remove-ip",
+        key: clientIpKey(req),
+        limit: 30,
+        windowSec: 300,
+        message: "Too many player removal attempts. Slow down and try again.",
+      },
+      {
+        name: "participants-remove-admin",
+        key: adminToken ? rateLimitKey("admin", adminToken) : null,
+        limit: 30,
+        windowSec: 300,
+        message: "Too many player removal attempts. Slow down and try again.",
+      },
+    ]);
+    if (limited) return limited;
+
+    await assertAdmin(supabase, params.id, adminToken);
 
     const { data: tournament } = await supabase
       .from("tournaments")

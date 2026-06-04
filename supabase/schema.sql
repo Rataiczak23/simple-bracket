@@ -13,6 +13,8 @@
 --     The rankings page is rendered server-side with the service-role key.
 
 -- Clean slate (safe to re-run)
+drop function if exists consume_rate_limit(text, text, integer, integer);
+drop table if exists rate_limit_hits cascade;
 drop table if exists results cascade;
 drop table if exists matches cascade;
 drop table if exists participants cascade;
@@ -94,9 +96,71 @@ create table results (
   unique (tournament_id, user_id)
 );
 
+create table rate_limit_hits (
+  action       text not null,
+  key_hash     text not null,
+  window_start timestamptz not null,
+  hits         int not null default 0,
+  created_at   timestamptz not null default now(),
+  primary key (action, key_hash, window_start)
+);
+
 create index participants_tournament_idx on participants(tournament_id);
 create index matches_tournament_idx on matches(tournament_id);
 create index results_user_idx on results(user_id);
+create index rate_limit_hits_window_idx on rate_limit_hits(window_start);
+
+create or replace function consume_rate_limit(
+  p_action text,
+  p_key_hash text,
+  p_window_seconds integer,
+  p_max_hits integer
+)
+returns table (allowed boolean, remaining integer, retry_after_seconds integer)
+language plpgsql
+as $$
+declare
+  v_now timestamptz := now();
+  v_window_start timestamptz;
+  v_hits integer;
+  v_retry integer;
+begin
+  if p_window_seconds <= 0 then
+    raise exception 'p_window_seconds must be > 0';
+  end if;
+  if p_max_hits <= 0 then
+    raise exception 'p_max_hits must be > 0';
+  end if;
+
+  v_window_start := to_timestamp(
+    floor(extract(epoch from v_now) / p_window_seconds) * p_window_seconds
+  );
+
+  if random() < 0.02 then
+    delete from rate_limit_hits
+    where window_start < v_now - interval '1 day';
+  end if;
+
+  insert into rate_limit_hits (action, key_hash, window_start, hits)
+  values (p_action, p_key_hash, v_window_start, 1)
+  on conflict (action, key_hash, window_start)
+  do update set hits = rate_limit_hits.hits + 1
+  returning hits into v_hits;
+
+  v_retry := greatest(
+    ceil(
+      extract(epoch from ((v_window_start + make_interval(secs => p_window_seconds)) - v_now))
+    )::int,
+    1
+  );
+
+  return query
+  select v_hits <= p_max_hits, greatest(p_max_hits - v_hits, 0), v_retry;
+end;
+$$;
+
+revoke all on function consume_rate_limit(text, text, integer, integer) from public, anon, authenticated;
+grant execute on function consume_rate_limit(text, text, integer, integer) to service_role;
 
 -- Row Level Security ---------------------------------------------------------
 alter table users              enable row level security;
@@ -106,13 +170,14 @@ alter table tournament_secrets enable row level security;
 alter table participants       enable row level security;
 alter table matches            enable row level security;
 alter table results            enable row level security;
+alter table rate_limit_hits    enable row level security;
 
 -- Public read access (no write policies => anon cannot write; service role bypasses RLS)
 create policy "public read tournaments"  on tournaments  for select using (true);
 create policy "public read participants" on participants for select using (true);
 create policy "public read matches"      on matches      for select using (true);
 
--- users, sessions, tournament_secrets, results: intentionally NO policies =>
+-- users, sessions, tournament_secrets, results, rate_limit_hits: intentionally NO policies =>
 -- unreadable/unwritable by anon. The server uses the service-role key for these.
 
 -- Realtime: broadcast row changes so the public bracket view updates live.

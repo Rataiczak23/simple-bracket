@@ -19,6 +19,8 @@ Next.js (App Router) · TypeScript · Tailwind CSS · Supabase (Postgres + Realt
 All writes go through server Route Handlers using the Supabase **service-role** key.
 The browser only ever uses the **anon** key (read + realtime, restricted by RLS). Admin
 tokens live in a separate `tournament_secrets` table the public can never read.
+Public write routes are rate-limited; in production the limiter is backed by Supabase so
+it works across Vercel instances.
 
 ## Setup
 
@@ -33,6 +35,9 @@ policies, and realtime publication.
 > Already running an older version with data? Run
 > [`supabase/migration-auth-rankings.sql`](supabase/migration-auth-rankings.sql) instead —
 > it adds the accounts + rankings tables without dropping your tournaments.
+>
+> If you already deployed this version before rate limiting was added, also run
+> [`supabase/migration-rate-limits.sql`](supabase/migration-rate-limits.sql).
 
 ### 3. Configure environment
 Copy `.env.local.example` to `.env.local` and fill in from **Project Settings → API**:

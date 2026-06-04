@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { assertAdmin, HttpError, errorResponse, tokenFromRequest } from "@/lib/admin";
 import { getCurrentUser } from "@/lib/auth";
+import { clientIpKey, enforceRateLimits, rateLimitKey } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -20,6 +21,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const body = await req.json().catch(() => ({}));
     const adminToken = tokenFromRequest(req);
 
+    const routeLimited = await enforceRateLimits(req, [
+      {
+        name: "participants-route-ip",
+        key: clientIpKey(req),
+        limit: 40,
+        windowSec: 600,
+        message: "Too many join/add-player attempts. Slow down and try again.",
+      },
+    ]);
+    if (routeLimited) return routeLimited;
+
     const { data: tournament, error: tErr } = await supabase
       .from("tournaments")
       .select("id, status")
@@ -35,6 +47,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     let displayName: string;
 
     if (adminToken) {
+      const adminLimited = await enforceRateLimits(req, [
+        {
+          name: "participants-admin-token",
+          key: rateLimitKey("admin", adminToken),
+          limit: 40,
+          windowSec: 600,
+          message: "Too many join/add-player attempts. Slow down and try again.",
+        },
+      ]);
+      if (adminLimited) return adminLimited;
+
       // Host adding another player by email.
       await assertAdmin(supabase, params.id, adminToken);
       const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
@@ -51,6 +74,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       // Self-join.
       const me = await getCurrentUser();
       if (!me) throw new HttpError(401, "Sign in to join this tournament.");
+
+      const joinLimited = await enforceRateLimits(req, [
+        {
+          name: "participants-self-user",
+          key: rateLimitKey("user", me.id),
+          limit: 12,
+          windowSec: 600,
+          message: "Too many join attempts. Slow down and try again.",
+        },
+      ]);
+      if (joinLimited) return joinLimited;
+
       userId = me.id;
       displayName = me.display_name;
     }
