@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-slate-950 text-slate-100 antialiased;
+}
+
+/* Thin scrollbars for the horizontally-scrolling bracket */
+.bracket-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+.bracket-scroll::-webkit-scrollbar-thumb {
+  @apply bg-slate-700 rounded-full;
+}
