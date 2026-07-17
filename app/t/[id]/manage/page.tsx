@@ -178,7 +178,8 @@ export default function ManagePage({ params }: { params: { id: string } }) {
           ) : (
             <>
               <p className="text-xs text-slate-500 mb-3">
-                Click the winner of each match to advance them.
+                Click the winner of each match to advance them. Made a mistake? Click the other
+                player to switch the result.
               </p>
               <BracketView
                 matches={matches}

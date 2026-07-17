@@ -7,14 +7,20 @@ interface Props {
   nameOf: (id: string | null) => string | null;
   /** When set, the card is interactive and clicking a player reports them as the winner. */
   onPickWinner?: (matchId: string, participantId: string) => void;
+  /** Whether this match's result may still be changed (nothing played after it). */
+  correctable?: boolean;
   busy?: boolean;
 }
 
-export default function MatchCard({ match, nameOf, onPickWinner, busy }: Props) {
-  const playable =
+export default function MatchCard({ match, nameOf, onPickWinner, correctable, busy }: Props) {
+  // A match is interactive whenever both real players are set (byes resolve on
+  // their own). Before a result it's "click to pick the winner"; after a result
+  // the other player stays clickable to fix a misclick — but only while this is
+  // still the most recent match (`correctable`), so an earlier result can't be
+  // changed out from under matches already played after it.
+  const interactive =
     !!onPickWinner &&
     !match.is_bye &&
-    match.winner_id === null &&
     match.slot1_participant !== null &&
     match.slot2_participant !== null;
 
@@ -24,7 +30,8 @@ export default function MatchCard({ match, nameOf, onPickWinner, busy }: Props) 
         slot={1}
         match={match}
         nameOf={nameOf}
-        playable={playable}
+        interactive={interactive}
+        correctable={!!correctable}
         busy={busy}
         onPickWinner={onPickWinner}
       />
@@ -33,7 +40,8 @@ export default function MatchCard({ match, nameOf, onPickWinner, busy }: Props) 
         slot={2}
         match={match}
         nameOf={nameOf}
-        playable={playable}
+        interactive={interactive}
+        correctable={!!correctable}
         busy={busy}
         onPickWinner={onPickWinner}
       />
@@ -45,20 +53,23 @@ function Slot({
   slot,
   match,
   nameOf,
-  playable,
+  interactive,
+  correctable,
   busy,
   onPickWinner,
 }: {
   slot: 1 | 2;
   match: Match;
   nameOf: (id: string | null) => string | null;
-  playable: boolean;
+  interactive: boolean;
+  correctable: boolean;
   busy?: boolean;
   onPickWinner?: (matchId: string, participantId: string) => void;
 }) {
   const pid = slot === 1 ? match.slot1_participant : match.slot2_participant;
   const name = nameOf(pid);
-  const isWinner = match.winner_id !== null && match.winner_id === pid;
+  const decided = match.winner_id !== null;
+  const isWinner = decided && match.winner_id === pid;
   // In a bye, the lone present player has advanced.
   const advancedByBye = match.is_bye && pid !== null;
 
@@ -72,17 +83,35 @@ function Slot({
       ? "text-slate-500 italic"
       : "text-slate-200";
 
-  if (playable && pid) {
+  // Before a result: either player is clickable to pick the winner. After a
+  // result: the other player is clickable to switch, but only while this match
+  // is still correctable (nothing has been played after it).
+  const clickable = interactive && !!pid && !isWinner && (!decided || correctable);
+  if (clickable && pid) {
+    const changing = decided;
+    const onClick = () => {
+      if (
+        changing &&
+        !confirm(
+          `Change the winner to ${label}? Any matches after this one will be reset.`
+        )
+      ) {
+        return;
+      }
+      onPickWinner?.(match.id, pid);
+    };
     return (
       <button
         type="button"
         disabled={busy}
-        onClick={() => onPickWinner?.(match.id, pid)}
+        onClick={onClick}
         className={`${base} w-full text-left hover:bg-emerald-800/40 disabled:opacity-50 ${stateClass}`}
-        title="Click to mark as winner"
+        title={changing ? "Click to switch the winner to this player" : "Click to mark as winner"}
       >
         <span className="truncate">{label}</span>
-        <span aria-hidden className="text-xs text-emerald-400">win ▸</span>
+        <span aria-hidden className="text-xs text-emerald-400">
+          {changing ? "switch ▸" : "win ▸"}
+        </span>
       </button>
     );
   }

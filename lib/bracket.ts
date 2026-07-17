@@ -293,6 +293,30 @@ function slotSettled(m: BracketMatch, slot: 1 | 2, feeder: Map<string, BracketMa
   return isDecided(f); // settled once the feeding match has resolved
 }
 
+/**
+ * Clear a match's result and recursively clear every match it feeds. Changing a
+ * result invalidates the participants (and therefore the recorded winners) of
+ * everything downstream, so those matches are reopened to be re-played. Runs
+ * over the forward DAG, so it always terminates; revisiting a converged node
+ * (e.g. the grand final, reachable via both winner and loser paths) is a
+ * harmless no-op.
+ */
+function reopenForward(m: BracketMatch, byId: Map<string, BracketMatch>) {
+  m.winner_id = null;
+  m.is_bye = false;
+  const edges: Array<[string | null, 1 | 2 | null]> = [
+    [m.next_match_id, m.next_match_slot],
+    [m.loser_next_match_id, m.loser_next_match_slot],
+  ];
+  for (const [nextId, slot] of edges) {
+    if (!nextId || !slot) continue;
+    const nx = byId.get(nextId);
+    if (!nx) continue;
+    reopenForward(nx, byId); // clear the downstream result first…
+    setSlot(nx, slot, null); // …then remove the participant we had sent there
+  }
+}
+
 /** Push a decided match's winner forward and its loser into the losers bracket. */
 function pushResult(m: BracketMatch, byId: Map<string, BracketMatch>) {
   const w = m.winner_id;
@@ -338,6 +362,63 @@ function resolve<T extends BracketMatch>(matches: T[]): T[] {
   return matches;
 }
 
+/**
+ * Identify matches that are (or can ever become) a real contest: both slots
+ * reachable by a real player. The complement are "phantom" matches — byes and
+ * walkovers that settle with at most one real player. This is purely structural
+ * (it follows the bracket wiring, not the current results), so a match's status
+ * never flips as games are played. Used to hide rounds where no actual game is
+ * ever played — common in the early losers bracket when the winners bracket has
+ * many first-round byes.
+ */
+export function realContestMatchIds<T extends BracketMatch>(matches: T[]): Set<string> {
+  const feeder = new Map<string, { m: T; edge: "w" | "l" }>();
+  for (const m of matches) {
+    if (m.next_match_id && m.next_match_slot) {
+      feeder.set(`${m.next_match_id}:${m.next_match_slot}`, { m, edge: "w" });
+    }
+    if (m.loser_next_match_id && m.loser_next_match_slot) {
+      feeder.set(`${m.loser_next_match_id}:${m.loser_next_match_slot}`, { m, edge: "l" });
+    }
+  }
+
+  const winnerReal = new Map<string, boolean>();
+  const loserReal = new Map<string, boolean>();
+
+  // A slot can hold a real player if it already does, or the match feeding it
+  // can send one down that edge (its winner; or its loser, which is real only
+  // when the feeder itself has two real players).
+  const slotReal = (m: T, s: 1 | 2): boolean => {
+    const pid = s === 1 ? m.slot1_participant : m.slot2_participant;
+    if (pid !== null) return true;
+    const f = feeder.get(`${m.id}:${s}`);
+    if (!f) return false;
+    return f.edge === "w" ? canProduceWinner(f.m) : canProduceLoser(f.m);
+  };
+  function canProduceWinner(m: T): boolean {
+    const cached = winnerReal.get(m.id);
+    if (cached !== undefined) return cached;
+    winnerReal.set(m.id, false); // guard (bracket is acyclic, so never re-read)
+    const v = slotReal(m, 1) || slotReal(m, 2);
+    winnerReal.set(m.id, v);
+    return v;
+  }
+  function canProduceLoser(m: T): boolean {
+    const cached = loserReal.get(m.id);
+    if (cached !== undefined) return cached;
+    loserReal.set(m.id, false);
+    const v = slotReal(m, 1) && slotReal(m, 2);
+    loserReal.set(m.id, v);
+    return v;
+  }
+
+  const ids = new Set<string>();
+  for (const m of matches) {
+    if (slotReal(m, 1) && slotReal(m, 2)) ids.add(m.id);
+  }
+  return ids;
+}
+
 export interface ApplyWinnerResult {
   matches: Match[];
   /** participant id of the tournament champion, or null if not finished yet. */
@@ -365,6 +446,70 @@ export function applyWinner(matches: Match[], matchId: string, winnerId: string)
   resolve(matches); // cascade any byes that this result unlocks downstream
 
   // The championship match is the one nobody advances out of.
+  const finalMatch = matches.find((x) => x.next_match_id === null);
+  const champion = finalMatch?.winner_id ?? null;
+
+  return { matches, champion };
+}
+
+/**
+ * A decided match's result can be changed only if nothing it fed has itself been
+ * decided yet — i.e. it sits on the frontier of played matches. This keeps a
+ * correction to the most recent result, so fixing a misclick never silently
+ * rewrites a whole subtree of later matches. Returns the set of correctable
+ * match ids.
+ */
+export function correctableMatchIds<T extends BracketMatch>(matches: T[]): Set<string> {
+  const byId = new Map<string, BracketMatch>(matches.map((m) => [m.id, m]));
+  const downstreamDecided = (id: string | null): boolean => {
+    if (!id) return false;
+    const nx = byId.get(id);
+    return !!nx && (nx.winner_id !== null || nx.is_bye);
+  };
+  const ids = new Set<string>();
+  for (const m of matches) {
+    if (m.is_bye || m.winner_id === null) continue; // not a changeable result
+    if (downstreamDecided(m.next_match_id)) continue; // winner already advanced
+    if (downstreamDecided(m.loser_next_match_id)) continue; // loser already played on
+    ids.add(m.id);
+  }
+  return ids;
+}
+
+/** Whether a single match's result may currently be corrected. */
+export function canCorrectMatch<T extends BracketMatch>(matches: T[], matchId: string): boolean {
+  return correctableMatchIds(matches).has(matchId);
+}
+
+/**
+ * Fix a mis-clicked result: change an already-decided match's winner to the
+ * other player. Everything the match fed is reopened (its participants may have
+ * changed, so those results no longer hold), then byes re-cascade. Returns the
+ * mutated matches and the champion id if the tournament is still/again complete.
+ */
+export function correctWinner(matches: Match[], matchId: string, winnerId: string): ApplyWinnerResult {
+  const byId = new Map<string, Match>(matches.map((m) => [m.id, m]));
+  const m = byId.get(matchId);
+  if (!m) throw new Error("Match not found.");
+  if (m.is_bye) throw new Error("A bye has no winner to change.");
+  if (m.slot1_participant === null || m.slot2_participant === null) {
+    throw new Error("Both players must be set before choosing a winner.");
+  }
+  if (winnerId !== m.slot1_participant && winnerId !== m.slot2_participant) {
+    throw new Error("Winner must be one of the two players in the match.");
+  }
+  if (!canCorrectMatch(matches, matchId)) {
+    throw new Error(
+      "Only the most recent result can be changed. A later match has already been played from this one."
+    );
+  }
+
+  // Reopen this match and everything it feeds, then apply the corrected winner.
+  reopenForward(m, byId);
+  m.winner_id = winnerId;
+  pushResult(m, byId);
+  resolve(matches);
+
   const finalMatch = matches.find((x) => x.next_match_id === null);
   const champion = finalMatch?.winner_id ?? null;
 

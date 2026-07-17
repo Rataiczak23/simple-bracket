@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { randomInt } from "crypto";
 import { createServiceClient } from "@/lib/supabase/server";
 import { assertAdmin, errorResponse, tokenFromRequest, HttpError } from "@/lib/admin";
 import { generateBracket } from "@/lib/bracket";
@@ -6,6 +7,15 @@ import type { Participant, Tournament } from "@/lib/types";
 import { clientIpKey, enforceRateLimits, rateLimitKey } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+
+/** Fisher-Yates shuffle (in place) using unbiased crypto randomness. */
+function shuffle<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = randomInt(i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
 
 // POST /api/tournaments/[id]/start -> generate the bracket and lock entries.
 export async function POST(req: Request, { params }: { params: { id: string } }) {
@@ -46,14 +56,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       .from("participants")
       .select("*")
       .eq("tournament_id", params.id)
-      .order("created_at", { ascending: true })
       .returns<Participant[]>();
 
     if (!participants || participants.length < 2) {
       throw new HttpError(400, "Need at least 2 players to start.");
     }
 
-    const matches = generateBracket(params.id, tournament.format, participants);
+    // Randomize seeding so join order doesn't decide the bracket. Without this,
+    // participant index maps straight to seed number, meaning the first players
+    // to join would always draw the byes (and the softest early matchups).
+    const seeded = shuffle([...participants]);
+
+    const matches = generateBracket(params.id, tournament.format, seeded);
 
     const { error: mErr } = await supabase.from("matches").insert(matches);
     if (mErr) throw new HttpError(500, "Could not generate the bracket.");

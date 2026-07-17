@@ -22,16 +22,42 @@ export default function PublicView({
   initial: TournamentBundle;
   currentUser: AuthUser | null;
 }) {
-  const { bundle } = useLiveTournament(id, initial);
+  const { bundle, refetch } = useLiveTournament(id, initial);
   const [shareUrl, setShareUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pickError, setPickError] = useState<string | null>(null);
 
   useEffect(() => {
     setShareUrl(`${window.location.origin}/t/${id}`);
   }, [id]);
 
+  // Signed-in users can advance matchups from the public view. The request is
+  // authorized by the session cookie (sent automatically), so no admin token
+  // is needed here.
+  async function pickWinner(matchId: string, participantId: string) {
+    setBusy(true);
+    setPickError(null);
+    try {
+      const res = await fetch(`/api/matches/${matchId}/winner`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ winnerId: participantId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not record the result.");
+      await refetch();
+    } catch (err) {
+      setPickError(err instanceof Error ? err.message : "Could not record the result.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!bundle) return <p className="text-slate-400">Loading…</p>;
 
   const { tournament, participants, matches } = bundle;
+  // Only players who joined this tournament may advance matchups from here.
+  const isParticipant = participants.some((p) => p.user_id === currentUser?.id);
   const championName =
     tournament.winner_id != null
       ? participants.find((p) => p.id === tournament.winner_id)?.name ?? null
@@ -80,7 +106,21 @@ export default function PublicView({
               The bracket will appear here once the organizer starts the tournament.
             </p>
           ) : (
-            <BracketView matches={matches} participants={participants} />
+            <>
+              {isParticipant && (
+                <p className="text-xs text-slate-500 mb-3">
+                  Click a player to mark them as the winner. Clicked the wrong one? Click the other
+                  player to switch.
+                </p>
+              )}
+              {pickError && <p className="text-xs text-red-400 mb-3">{pickError}</p>}
+              <BracketView
+                matches={matches}
+                participants={participants}
+                busy={busy}
+                onPickWinner={isParticipant ? pickWinner : undefined}
+              />
+            </>
           )}
         </div>
       </div>

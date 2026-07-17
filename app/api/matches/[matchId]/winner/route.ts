@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { assertAdmin, errorResponse, tokenFromRequest, HttpError } from "@/lib/admin";
-import { applyWinner } from "@/lib/bracket";
+import { getCurrentUser } from "@/lib/auth";
+import { applyWinner, correctWinner } from "@/lib/bracket";
 import { computeResults } from "@/lib/rankings";
 import type { Match, Participant } from "@/lib/types";
 import { clientIpKey, enforceRateLimits, rateLimitKey } from "@/lib/rate-limit";
@@ -44,7 +45,24 @@ export async function POST(req: Request, { params }: { params: { matchId: string
       .single<{ tournament_id: string }>();
     if (!target) throw new HttpError(404, "Match not found.");
 
-    await assertAdmin(supabase, target.tournament_id, adminToken);
+    // A matchup can be advanced by the tournament host (admin token) or by any
+    // signed-in user who is a participant in THIS tournament. This lets players
+    // run the bracket from the public view without exposing it to strangers or
+    // to signed-in users who never joined.
+    const user = await getCurrentUser();
+    let allowed = false;
+    if (user) {
+      const { data: participant } = await supabase
+        .from("participants")
+        .select("id")
+        .eq("tournament_id", target.tournament_id)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      allowed = Boolean(participant);
+    }
+    if (!allowed) {
+      await assertAdmin(supabase, target.tournament_id, adminToken);
+    }
 
     const { data: matches } = await supabase
       .from("matches")
@@ -53,8 +71,21 @@ export async function POST(req: Request, { params }: { params: { matchId: string
       .returns<Match[]>();
     if (!matches) throw new HttpError(500, "Could not load the bracket.");
 
+    const current = matches.find((m) => m.id === params.matchId);
+    if (!current) throw new HttpError(404, "Match not found.");
+    const alreadyDecided = current.winner_id !== null || current.is_bye;
+
+    // Re-picking the same winner is a no-op; nothing to save.
+    if (alreadyDecided && current.winner_id === winnerId) {
+      return NextResponse.json({ ok: true, champion: winnerId, unchanged: true });
+    }
+
     const before = new Map(matches.map((m) => [m.id, JSON.stringify(m)]));
-    const { matches: updated, champion } = applyWinner(matches, params.matchId, winnerId);
+    // A fresh match records a winner and advances; an already-decided match is
+    // being corrected (misclick), which reopens everything it fed downstream.
+    const { matches: updated, champion } = alreadyDecided
+      ? correctWinner(matches, params.matchId, winnerId)
+      : applyWinner(matches, params.matchId, winnerId);
 
     // Persist only the matches that actually changed.
     const changed = updated.filter((m) => before.get(m.id) !== JSON.stringify(m));
@@ -81,6 +112,22 @@ export async function POST(req: Request, { params }: { params: { matchId: string
       }));
       if (results.length > 0) {
         await supabase.from("results").upsert(results, { onConflict: "tournament_id,user_id" });
+      }
+    } else {
+      // A correction may have undone a previously-crowned champion. If so, roll
+      // the tournament back to in_progress and drop the now-stale standings so
+      // the power rankings don't keep counting a result that no longer stands.
+      const { data: t } = await supabase
+        .from("tournaments")
+        .select("status")
+        .eq("id", target.tournament_id)
+        .single<{ status: string }>();
+      if (t?.status === "completed") {
+        await supabase
+          .from("tournaments")
+          .update({ status: "in_progress", winner_id: null })
+          .eq("id", target.tournament_id);
+        await supabase.from("results").delete().eq("tournament_id", target.tournament_id);
       }
     }
 
