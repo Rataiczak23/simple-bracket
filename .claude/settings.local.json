@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npm install *)",
-      "Bash(npx --yes tsx lib/bracket.test.mjs)"
-    ]
-  }
-}

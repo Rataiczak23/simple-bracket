@@ -12,6 +12,9 @@
 .env
 .env*.local
 
+# local claude settings
+.claude/settings.local.json
+
 # misc
 .DS_Store
 *.pem
