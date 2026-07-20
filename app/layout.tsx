@@ -27,6 +27,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <Link href="/rankings" className="text-sm text-slate-400 hover:text-slate-200">
                 Rankings
               </Link>
+              <Link href="/history" className="text-sm text-slate-400 hover:text-slate-200">
+                History
+              </Link>
               <div className="ml-auto flex items-center gap-3 text-sm">
                 {user ? (
                   <>
