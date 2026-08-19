@@ -169,7 +169,7 @@ export default function ManagePage({ params }: { params: { id: string } }) {
           </div>
         </aside>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 min-h-[10rem]">
+        <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900 p-4 min-h-[10rem]">
           {tournament.status === "setup" ? (
             <p className="text-slate-400 text-sm">
               Add players, then start the tournament to generate the bracket. Click a player in a

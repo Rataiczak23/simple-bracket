@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/server";
 import { fetchBundle } from "@/lib/fetchBundle";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, isOwner } from "@/lib/auth";
 import PublicView from "./PublicView";
 
 export const dynamic = "force-dynamic";
@@ -11,5 +11,7 @@ export default async function PublicTournamentPage({ params }: { params: { id: s
   const [bundle, user] = await Promise.all([fetchBundle(supabase, params.id), getCurrentUser()]);
   if (!bundle) notFound();
 
-  return <PublicView id={params.id} initial={bundle} currentUser={user} />;
+  return (
+    <PublicView id={params.id} initial={bundle} currentUser={user} canDelete={isOwner(user)} />
+  );
 }

@@ -99,3 +99,37 @@ export async function requireUser(): Promise<AuthUser> {
   if (!user) throw new HttpError(401, "You must be signed in to do that.");
   return user;
 }
+
+// --- Owner (single-operator) authorization ----------------------------------
+
+/**
+ * The one account allowed to perform destructive site-wide actions (currently:
+ * deleting a tournament). Identified by `OWNER_EMAIL`, a server-side env var —
+ * deliberately NOT a database flag, so the privilege cannot be granted through
+ * the app by anyone, including a compromised account. If the var is unset the
+ * check fails closed and nobody is the owner.
+ */
+export function isOwner(user: AuthUser | null): boolean {
+  const owner = process.env.OWNER_EMAIL?.trim().toLowerCase();
+  if (!owner || !user) return false;
+  return user.email.trim().toLowerCase() === owner;
+}
+
+/** Like requireUser, but also demands the owner account. For Route Handlers. */
+export async function requireOwner(): Promise<AuthUser> {
+  const user = await requireUser();
+  if (!isOwner(user)) throw new HttpError(403, "Only the site owner can do that.");
+  return user;
+}
+
+// --- Redirect helpers -------------------------------------------------------
+
+/**
+ * Sanitize a `?next=` value before redirecting to it. Only same-origin absolute
+ * paths are allowed — anything else (protocol-relative `//evil.com`, a full URL,
+ * a missing param) falls back to the home page.
+ */
+export function safeRedirectPath(next: string | undefined, fallback = "/"): string {
+  if (!next || !next.startsWith("/") || next.startsWith("//")) return fallback;
+  return next;
+}

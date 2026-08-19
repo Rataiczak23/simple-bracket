@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useLiveTournament } from "@/components/useLiveTournament";
 import BracketView from "@/components/BracketView";
+import DeleteTournamentButton from "@/components/DeleteTournamentButton";
 import {
   ChampionBanner,
   CopyLink,
@@ -17,10 +18,13 @@ export default function PublicView({
   id,
   initial,
   currentUser,
+  canDelete = false,
 }: {
   id: string;
   initial: TournamentBundle;
   currentUser: AuthUser | null;
+  /** True only for the site owner. The API re-checks; this just draws the control. */
+  canDelete?: boolean;
 }) {
   const { bundle, refetch } = useLiveTournament(id, initial);
   const [shareUrl, setShareUrl] = useState("");
@@ -98,9 +102,25 @@ export default function PublicView({
               <CopyLink label="Share this tournament" url={shareUrl} />
             </div>
           )}
+
+          {/* Owner only, and only while the tournament is unfinished — completed
+              ones are the source of the power rankings. */}
+          {canDelete && tournament.status !== "completed" && (
+            <div className="rounded-lg border border-red-900/60 bg-slate-900 p-4 space-y-3">
+              <h2 className="font-semibold text-red-300">Danger zone</h2>
+              <p className="text-xs text-slate-500">
+                Permanently deletes this tournament, its players, its bracket, and its admin link.
+              </p>
+              <DeleteTournamentButton
+                tournamentId={id}
+                tournamentName={tournament.name}
+                redirectTo="/history"
+              />
+            </div>
+          )}
         </aside>
 
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 min-h-[10rem]">
+        <div className="min-w-0 rounded-lg border border-slate-800 bg-slate-900 p-4 min-h-[10rem]">
           {tournament.status === "setup" ? (
             <p className="text-slate-400 text-sm">
               The bracket will appear here once the organizer starts the tournament.
