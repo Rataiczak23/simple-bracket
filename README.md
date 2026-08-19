@@ -46,6 +46,7 @@ Copy `.env.local.example` to `.env.local` and fill in from **Project Settings �
 NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...        # "anon public" key
 SUPABASE_SERVICE_ROLE_KEY=...            # "service_role" secret key (server only)
+OWNER_EMAIL=you@example.com              # the one account that may delete tournaments
 ```
 
 ### 4. Run
@@ -58,7 +59,7 @@ Open http://localhost:3000.
 ## Deploy to Vercel
 1. Push this repo to GitHub.
 2. Import it at [vercel.com/new](https://vercel.com/new) (framework auto-detected as Next.js).
-3. Add the three environment variables above in **Project Settings → Environment Variables**.
+3. Add the environment variables above in **Project Settings → Environment Variables**.
 4. Deploy. (Or run `vercel` from the CLI and set the env vars when prompted.)
 
 ## How it works
@@ -70,11 +71,19 @@ Open http://localhost:3000.
 | `/rankings` | public | Power rankings — placement points across all tournaments |
 | `/t/[id]` | public | Live bracket, player list, self-join (signed in, while open) |
 | `/t/[id]/manage#token=…` | host | Add players by email, start, report winners, reset |
+| `/history` | public | Every tournament, newest first (owner also sees delete controls) |
 
 **Auth model.** Accounts live in a `users` table (passwords hashed with Node's `scrypt`);
 sign-in is email + password, with an opaque httpOnly session cookie backed by a `sessions`
 table. No Supabase Auth, no OAuth — one username/password method. The public bracket view
 stays open to everyone; creating and joining require an account so results can be linked.
+
+**Owner deletes.** One account — the email in `OWNER_EMAIL` — can permanently delete a
+tournament along with its participants, matches, saved results, and admin token. It is an
+env var rather than a database flag so the privilege can't be granted through the app, and
+it fails closed when unset. Only `setup` and `in_progress` tournaments can be deleted;
+completed ones are the record the power rankings are built from. Hosts and admin-token
+holders get no delete power — they still have **Reset bracket** on the manage page.
 
 **Rankings.** When a tournament completes, each player's placement and points are saved to
 a `results` table (champion 100, runner-up 70, semifinal 40, quarterfinal 20, last-16 10,

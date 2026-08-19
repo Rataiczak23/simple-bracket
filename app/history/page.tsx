@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { createServiceClient } from "@/lib/supabase/server";
 import { FormatBadge, StatusBadge } from "@/components/TournamentBits";
+import DeleteTournamentButton from "@/components/DeleteTournamentButton";
+import { getCurrentUser, isOwner } from "@/lib/auth";
 import type { Tournament } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +21,8 @@ function formatDate(iso: string): string {
 
 export default async function HistoryPage() {
   const supabase = createServiceClient();
+  // Only the site owner gets delete controls, and only on unfinished rows.
+  const owner = isOwner(await getCurrentUser());
   const { data } = await supabase
     .from("tournaments")
     .select("id, name, format, status, winner_id, created_at, participants(count)")
@@ -91,12 +95,21 @@ export default async function HistoryPage() {
                     )}
                   </div>
                 </div>
-                <Link
-                  href={`/t/${t.id}`}
-                  className="whitespace-nowrap rounded-md border border-slate-700 hover:border-slate-600 px-3 py-1.5 text-sm font-medium"
-                >
-                  {viewLabel} →
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/t/${t.id}`}
+                    className="whitespace-nowrap rounded-md border border-slate-700 hover:border-slate-600 px-3 py-1.5 text-sm font-medium"
+                  >
+                    {viewLabel} →
+                  </Link>
+                  {owner && t.status !== "completed" && (
+                    <DeleteTournamentButton
+                      tournamentId={t.id}
+                      tournamentName={t.name}
+                      compact
+                    />
+                  )}
+                </div>
               </li>
             );
           })}
