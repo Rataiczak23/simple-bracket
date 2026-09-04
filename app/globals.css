@@ -10,6 +10,21 @@ body {
   @apply bg-slate-950 text-slate-100 antialiased;
 }
 
+/* Outer page container: full width bar a small gutter. This is the width a
+   bracket wants — rounds run left to right, so the screen is the constraint.
+   The cap only bites on very wide displays. */
+.page-shell {
+  @apply w-full max-w-[110rem] mx-auto px-4 sm:px-6;
+}
+
+/* Everything that isn't a bracket sits in a normal reading column instead of
+   stretching across a wide monitor. Applied per page (inside .page-shell)
+   rather than in the layout, since a child can't opt back out of a parent's
+   max-width — only the pages that want to be narrow ask for it. */
+.narrow-shell {
+  @apply max-w-6xl mx-auto;
+}
+
 /* Shared text input for the auth forms */
 .auth-input {
   @apply w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600;

@@ -62,7 +62,7 @@ export default async function RankingsPage() {
   const standings = aggregate(data ?? []);
 
   return (
-    <div className="space-y-6">
+    <div className="narrow-shell space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-bold">🏅 Power Rankings</h1>
         <span className="text-sm text-slate-500">Placement points across all completed tournaments</span>
