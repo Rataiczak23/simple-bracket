@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import Field from "@/components/Field";
 
 function Form() {
   const router = useRouter();
@@ -121,28 +122,6 @@ function Form() {
           Sign in
         </Link>
       </p>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  id,
-  hint,
-  children,
-}: {
-  label: string;
-  id: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label htmlFor={id} className="block text-sm text-slate-400 mb-1">
-        {label}
-        {hint && <span className="text-slate-600"> · {hint}</span>}
-      </label>
-      {children}
     </div>
   );
 }

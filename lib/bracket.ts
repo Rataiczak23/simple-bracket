@@ -452,41 +452,6 @@ export function applyWinner(matches: Match[], matchId: string, winnerId: string)
   return { matches, champion };
 }
 
-/**
- * A decided match's result can be changed only if nothing it fed has itself been
- * decided yet — i.e. it sits on the frontier of played matches. This keeps a
- * correction to the most recent result, so fixing a misclick never silently
- * rewrites a whole subtree of later matches. Returns the set of correctable
- * match ids.
- */
-export function correctableMatchIds<T extends BracketMatch>(matches: T[]): Set<string> {
-  const byId = new Map<string, BracketMatch>(matches.map((m) => [m.id, m]));
-  const downstreamDecided = (id: string | null): boolean => {
-    if (!id) return false;
-    const nx = byId.get(id);
-    return !!nx && (nx.winner_id !== null || nx.is_bye);
-  };
-  const ids = new Set<string>();
-  for (const m of matches) {
-    if (m.is_bye || m.winner_id === null) continue; // not a changeable result
-    if (downstreamDecided(m.next_match_id)) continue; // winner already advanced
-    if (downstreamDecided(m.loser_next_match_id)) continue; // loser already played on
-    ids.add(m.id);
-  }
-  return ids;
-}
-
-/** Whether a single match's result may currently be corrected. */
-export function canCorrectMatch<T extends BracketMatch>(matches: T[], matchId: string): boolean {
-  return correctableMatchIds(matches).has(matchId);
-}
-
-/** A spot in a live bracket where a late entrant can still be dropped in. */
-export interface OpenSlot {
-  matchId: string;
-  slot: 1 | 2;
-}
-
 /** A result two real players actually contested — as opposed to a bye walkover. */
 function hasPlayedResult(m: BracketMatch): boolean {
   return m.winner_id !== null && m.slot1_participant !== null && m.slot2_participant !== null;
@@ -508,6 +473,40 @@ function descendants(m: BracketMatch, byId: Map<string, BracketMatch>): BracketM
   walk(m.next_match_id);
   walk(m.loser_next_match_id);
   return out;
+}
+
+/**
+ * A played result can be changed only while no *contested* match has happened
+ * after it anywhere downstream — on the winner's path or the loser's. That
+ * keeps a correction to the frontier of real games, so fixing a misclick never
+ * silently rewrites a match somebody actually played.
+ *
+ * Only played results count as blocking. Byes and walkovers downstream are
+ * decided too, but nobody played them, so they are free to re-resolve — which
+ * matters constantly in a bye-heavy field: a winners-bracket loser dropped into
+ * the early losers bracket is usually walked over immediately, and treating
+ * that as "already played on" would lock the result the instant it was entered.
+ */
+export function correctableMatchIds<T extends BracketMatch>(matches: T[]): Set<string> {
+  const byId = new Map<string, BracketMatch>(matches.map((m) => [m.id, m]));
+  const ids = new Set<string>();
+  for (const m of matches) {
+    if (!hasPlayedResult(m)) continue; // nothing a host chose, so nothing to change
+    if (descendants(m, byId).some(hasPlayedResult)) continue;
+    ids.add(m.id);
+  }
+  return ids;
+}
+
+/** Whether a single match's result may currently be corrected. */
+export function canCorrectMatch<T extends BracketMatch>(matches: T[], matchId: string): boolean {
+  return correctableMatchIds(matches).has(matchId);
+}
+
+/** A spot in a live bracket where a late entrant can still be dropped in. */
+export interface OpenSlot {
+  matchId: string;
+  slot: 1 | 2;
 }
 
 /**

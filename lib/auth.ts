@@ -64,6 +64,18 @@ export async function destroySession(): Promise<void> {
 }
 
 /**
+ * Sign out every *other* device for a user, keeping the caller's own session.
+ * Used after a password change: whoever knew the old password (or held a stolen
+ * session token) loses access, while the person making the change stays put
+ * instead of being bounced to the login screen.
+ */
+export async function revokeOtherSessions(userId: string): Promise<void> {
+  const token = cookies().get(SESSION_COOKIE)?.value ?? "";
+  const supabase = createServiceClient();
+  await supabase.from("sessions").delete().eq("user_id", userId).neq("token", token);
+}
+
+/**
  * Resolve the signed-in user from the session cookie, or null if not signed in
  * / the session is missing or expired. Safe to call in Server Components and
  * Route Handlers.

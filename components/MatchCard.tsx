@@ -75,8 +75,10 @@ function Slot({
 
   const label = name ?? (match.is_bye ? "Bye" : "—");
 
-  const base =
-    "flex items-center justify-between px-2 py-1.5 transition-colors";
+  // Fixed slot height (names truncate to one line, so they never wrap): it
+  // makes the card exactly CARD_H tall in BracketView, which is what lets the
+  // connector lines be computed geometry instead of measured DOM.
+  const base = "flex h-8 items-center justify-between px-2 transition-colors";
   const stateClass = isWinner || advancedByBye
     ? "bg-emerald-900/40 text-emerald-200 font-semibold"
     : pid === null

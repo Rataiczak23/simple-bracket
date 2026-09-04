@@ -8,7 +8,7 @@ export default async function HomePage() {
   const user = await getCurrentUser();
 
   return (
-    <div className="grid md:grid-cols-2 gap-10 items-start">
+    <div className="narrow-shell grid md:grid-cols-2 gap-10 items-start">
       <section className="space-y-4">
         <h1 className="text-3xl font-bold leading-tight">
           🎯 Run a darts tournament in seconds.

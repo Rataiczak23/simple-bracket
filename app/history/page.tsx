@@ -44,7 +44,7 @@ export default async function HistoryPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="narrow-shell space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-bold">📜 Match History</h1>
         <span className="text-sm text-slate-500">Every tournament, newest first</span>
