@@ -12,6 +12,11 @@ import {
   StatusBadge,
 } from "@/components/TournamentBits";
 import { resolveAdminToken } from "@/components/adminToken";
+import { openByeSlots } from "@/lib/bracket";
+
+/** JSON body every admin endpoint answers with (fields present as relevant). */
+type AdminBody = { error?: string; canRebuild?: boolean };
+type AdminResult = { ok: boolean; body: AdminBody };
 
 export default function ManagePage({ params }: { params: { id: string } }) {
   const id = params.id;
@@ -30,8 +35,8 @@ export default function ManagePage({ params }: { params: { id: string } }) {
   }, [id]);
 
   const adminCall = useCallback(
-    async (path: string, init?: RequestInit) => {
-      if (!token) return;
+    async (path: string, init?: RequestInit): Promise<AdminResult> => {
+      if (!token) return { ok: false, body: {} };
       setBusy(true);
       setError(null);
       try {
@@ -39,16 +44,27 @@ export default function ManagePage({ params }: { params: { id: string } }) {
           ...init,
           headers: { "Content-Type": "application/json", "x-admin-token": token, ...init?.headers },
         });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error ?? "Action failed.");
+        const body = (await res.json().catch(() => ({}))) as AdminBody;
+        if (!res.ok) {
+          setError(body.error ?? "Action failed.");
+          return { ok: false, body };
+        }
         await refetch();
+        return { ok: true, body };
       } catch (err) {
         setError(err instanceof Error ? err.message : "Action failed.");
+        return { ok: false, body: {} };
       } finally {
         setBusy(false);
       }
     },
     [token, refetch]
+  );
+
+  // Spots a latecomer could still be dropped into without voiding a result.
+  const openSlotCount = useMemo(
+    () => (bundle ? openByeSlots(bundle.matches).length : 0),
+    [bundle]
   );
 
   const championName = useMemo(() => {
@@ -119,6 +135,22 @@ export default function ManagePage({ params }: { params: { id: string } }) {
                   })
                 }
                 busy={busy}
+              />
+            </div>
+          )}
+
+          {tournament.status === "in_progress" && (
+            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4 space-y-3">
+              <h2 className="font-semibold">Add a late player</h2>
+              <LateEntryForm
+                openSlotCount={openSlotCount}
+                busy={busy}
+                onAdd={(email, mode) =>
+                  adminCall(`/api/tournaments/${id}/late-entry`, {
+                    method: "POST",
+                    body: JSON.stringify({ email, mode }),
+                  })
+                }
               />
             </div>
           )}
@@ -197,6 +229,85 @@ export default function ManagePage({ params }: { params: { id: string } }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Host-only late entry for a tournament that's already running. Preferred path
+ * is the non-destructive one: the player takes an unplayed bye spot and every
+ * recorded result stands. When the bracket has no such spot (a full
+ * power-of-2 field, or every bye already played on) the only way in is a
+ * rebuild, which wipes results — so that needs a second, deliberate click.
+ */
+function LateEntryForm({
+  openSlotCount,
+  busy,
+  onAdd,
+}: {
+  openSlotCount: number;
+  busy: boolean;
+  onAdd: (email: string, mode: "slot" | "rebuild") => Promise<AdminResult>;
+}) {
+  const [email, setEmail] = useState("");
+  const [slotRefused, setSlotRefused] = useState(false);
+
+  // The server re-checks; `slotRefused` only covers the race where someone
+  // played the last open bye between render and submit.
+  const mustRebuild = openSlotCount === 0 || slotRefused;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const value = email.trim();
+    if (!value) return;
+
+    if (mustRebuild) {
+      const ok = confirm(
+        "No open spot left, so the bracket has to be rebuilt. Every result so far will be cleared. Continue?"
+      );
+      if (!ok) return;
+      const res = await onAdd(value, "rebuild");
+      if (res.ok) {
+        setEmail("");
+        setSlotRefused(false);
+      }
+      return;
+    }
+
+    const res = await onAdd(value, "slot");
+    if (res.ok) setEmail("");
+    else if (res.body.canRebuild) setSlotRefused(true);
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3">
+      <p className="text-xs text-slate-500">
+        {mustRebuild
+          ? "No open spot left in this bracket. Adding someone now regenerates it and clears every result."
+          : `${openSlotCount} open bye ${
+              openSlotCount === 1 ? "spot" : "spots"
+            } — the new player drops into one and every result so far stands.`}
+      </p>
+      <div className="flex gap-2">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="player@email.com"
+          className="flex-1 rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          className={`rounded-md disabled:opacity-50 px-3 py-2 text-sm whitespace-nowrap ${
+            mustRebuild
+              ? "border border-amber-700 text-amber-200 hover:bg-amber-950/40"
+              : "bg-slate-700 hover:bg-slate-600"
+          }`}
+        >
+          {mustRebuild ? "Add & rebuild" : "Add"}
+        </button>
+      </div>
+    </form>
   );
 }
 

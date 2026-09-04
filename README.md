@@ -70,7 +70,7 @@ Open http://localhost:3000.
 | `/signup`, `/login` | anyone | Account: name, display name, email, password |
 | `/rankings` | public | Power rankings — placement points across all tournaments |
 | `/t/[id]` | public | Live bracket, player list, self-join (signed in, while open) |
-| `/t/[id]/manage#token=…` | host | Add players by email, start, report winners, reset |
+| `/t/[id]/manage#token=…` | host | Add players by email, start, add late players, report winners, reset |
 | `/history` | public | Every tournament, newest first (owner also sees delete controls) |
 
 **Auth model.** Accounts live in a `users` table (passwords hashed with Node's `scrypt`);
@@ -84,6 +84,15 @@ env var rather than a database flag so the privilege can't be granted through th
 it fails closed when unset. Only `setup` and `in_progress` tournaments can be deleted;
 completed ones are the record the power rankings are built from. Hosts and admin-token
 holders get no delete power — they still have **Reset bracket** on the manage page.
+
+**Late entries.** Someone show up after you hit Start? The manage page grows an **Add a
+late player** panel while a tournament is `in_progress` (host-only — there's no self-join
+once the bracket exists). The default path is non-destructive: the player takes one of the
+bracket's open bye spots, chosen at random, and every result already recorded stands. A
+spot only counts as open if nothing downstream of it has been contested, since filling it
+rewrites who plays those later matches. When no spot is left — a full power-of-2 field, or
+every bye already played on — the panel switches to **Add & rebuild**, which regenerates
+the bracket with the fuller field and clears all results (it asks first).
 
 **Rankings.** When a tournament completes, each player's placement and points are saved to
 a `results` table (champion 100, runner-up 70, semifinal 40, quarterfinal 20, last-16 10,

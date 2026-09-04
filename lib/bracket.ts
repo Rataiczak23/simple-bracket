@@ -481,6 +481,91 @@ export function canCorrectMatch<T extends BracketMatch>(matches: T[], matchId: s
   return correctableMatchIds(matches).has(matchId);
 }
 
+/** A spot in a live bracket where a late entrant can still be dropped in. */
+export interface OpenSlot {
+  matchId: string;
+  slot: 1 | 2;
+}
+
+/** A result two real players actually contested — as opposed to a bye walkover. */
+function hasPlayedResult(m: BracketMatch): boolean {
+  return m.winner_id !== null && m.slot1_participant !== null && m.slot2_participant !== null;
+}
+
+/** Every match reachable by following winner/loser edges out of `m` (excluding `m`). */
+function descendants(m: BracketMatch, byId: Map<string, BracketMatch>): BracketMatch[] {
+  const seen = new Set<string>();
+  const out: BracketMatch[] = [];
+  const walk = (id: string | null) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    const nx = byId.get(id);
+    if (!nx) return;
+    out.push(nx);
+    walk(nx.next_match_id);
+    walk(nx.loser_next_match_id);
+  };
+  walk(m.next_match_id);
+  walk(m.loser_next_match_id);
+  return out;
+}
+
+/**
+ * Bye slots a late entrant can still be dropped into, after the bracket has
+ * already been generated. A slot qualifies when:
+ *   - it is empty and nothing feeds it (a genuine bye, not a spot a later game fills);
+ *   - the sibling slot holds a real player, so the entrant gets an actual game;
+ *   - nothing the match feeds has been contested yet — filling the slot rewrites
+ *     the participants of everything downstream, so a real result down there
+ *     would no longer hold.
+ * Auto-advances (bye walkovers) downstream are fine to undo: nobody played them.
+ */
+export function openByeSlots<T extends BracketMatch>(matches: T[]): OpenSlot[] {
+  const byId = new Map<string, BracketMatch>(matches.map((m) => [m.id, m]));
+  const feeder = buildFeederIndex(matches);
+  const slots: OpenSlot[] = [];
+  for (const m of matches) {
+    const empty: 1 | 2 | null =
+      m.slot1_participant === null && m.slot2_participant !== null
+        ? 1
+        : m.slot2_participant === null && m.slot1_participant !== null
+          ? 2
+          : null;
+    if (empty === null) continue;
+    if (feeder.has(`${m.id}:${empty}`)) continue;
+    if (descendants(m, byId).some(hasPlayedResult)) continue;
+    slots.push({ matchId: m.id, slot: empty });
+  }
+  return slots;
+}
+
+/**
+ * Drop a late entrant into an open bye slot of a running bracket. The match
+ * turns from a walkover into a real game, so the free win it had handed out
+ * (and everything that cascaded from it) is undone first, then byes re-settle.
+ * Returns the mutated matches plus the champion, which a late entry all but
+ * always clears — the final sits downstream of every insertable slot.
+ */
+export function addLateEntrant(
+  matches: Match[],
+  participantId: string,
+  target: OpenSlot
+): ApplyWinnerResult {
+  const open = openByeSlots(matches);
+  if (!open.some((s) => s.matchId === target.matchId && s.slot === target.slot)) {
+    throw new Error("That spot is no longer open — someone has played on from it.");
+  }
+  const byId = new Map<string, Match>(matches.map((m) => [m.id, m]));
+  const m = byId.get(target.matchId)!;
+
+  reopenForward(m, byId);
+  setSlot(m, target.slot, participantId);
+  resolve(matches);
+
+  const finalMatch = matches.find((x) => x.next_match_id === null);
+  return { matches, champion: finalMatch?.winner_id ?? null };
+}
+
 /**
  * Fix a mis-clicked result: change an already-decided match's winner to the
  * other player. Everything the match fed is reopened (its participants may have
