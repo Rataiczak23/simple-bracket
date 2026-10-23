@@ -1,48 +1,15 @@
 import Link from "next/link";
+import { aggregateStandings, computeResults, type RankedResult } from "@/lib/rankings";
 import { createServiceClient } from "@/lib/supabase/server";
+import Pagination, { PAGE_SIZE, pageCount, resolvePage } from "@/components/Pagination";
+import type { Match, Participant } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-interface ResultRow {
-  user_id: string;
-  placement: number;
-  points: number;
-  matches_won: number;
-  users: { display_name: string } | null;
-}
-
-interface Standing {
-  userId: string;
-  displayName: string;
-  points: number;
-  events: number;
-  titles: number;
-  bestPlacement: number;
-  matchesWon: number;
-}
-
-function aggregate(rows: ResultRow[]): Standing[] {
-  const byUser = new Map<string, Standing>();
-  for (const r of rows) {
-    const s = byUser.get(r.user_id) ?? {
-      userId: r.user_id,
-      displayName: r.users?.display_name ?? "Unknown",
-      points: 0,
-      events: 0,
-      titles: 0,
-      bestPlacement: Infinity,
-      matchesWon: 0,
-    };
-    s.points += r.points;
-    s.events += 1;
-    if (r.placement === 1) s.titles += 1;
-    s.bestPlacement = Math.min(s.bestPlacement, r.placement);
-    s.matchesWon += r.matches_won;
-    byUser.set(r.user_id, s);
-  }
-  return [...byUser.values()].sort(
-    (a, b) => b.points - a.points || b.titles - a.titles || a.bestPlacement - b.bestPlacement
-  );
+interface CompletedTournament {
+  winner_id: string | null;
+  participants: Array<Participant & { users: { display_name: string } | null }>;
+  matches: Match[];
 }
 
 function ordinal(n: number): string {
@@ -52,14 +19,42 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
-export default async function RankingsPage() {
-  const supabase = createServiceClient();
-  const { data } = await supabase
-    .from("results")
-    .select("user_id, placement, points, matches_won, users(display_name)")
-    .returns<ResultRow[]>();
+// Supabase caps a response at 1,000 rows, so page through the tournaments.
+const FETCH_BATCH = 1000;
 
-  const standings = aggregate(data ?? []);
+async function loadCompletedTournaments(): Promise<CompletedTournament[]> {
+  const supabase = createServiceClient();
+  const all: CompletedTournament[] = [];
+  for (let from = 0; ; from += FETCH_BATCH) {
+    const { data } = await supabase
+      .from("tournaments")
+      .select("winner_id, participants(*, users(display_name)), matches(*)")
+      .eq("status", "completed")
+      .order("created_at")
+      .range(from, from + FETCH_BATCH - 1)
+      .returns<CompletedTournament[]>();
+    all.push(...(data ?? []));
+    if (!data || data.length < FETCH_BATCH) return all;
+  }
+}
+
+function resultRows(tournaments: CompletedTournament[]): RankedResult[] {
+  return tournaments.flatMap((t) => {
+    const names = new Map(
+      t.participants.map((p) => [p.user_id, p.users?.display_name ?? "Unknown"])
+    );
+    return computeResults(t.participants, t.matches, t.winner_id).map((r) => ({
+      ...r,
+      display_name: names.get(r.user_id) ?? "Unknown",
+    }));
+  });
+}
+
+export default async function RankingsPage({ searchParams }: { searchParams: { page?: string } }) {
+  const standings = aggregateStandings(resultRows(await loadCompletedTournaments()));
+  const totalPages = pageCount(standings.length);
+  const page = resolvePage(searchParams.page, totalPages, "/rankings");
+  const from = (page - 1) * PAGE_SIZE;
 
   return (
     <div className="narrow-shell space-y-6">
@@ -90,30 +85,36 @@ export default async function RankingsPage() {
               </tr>
             </thead>
             <tbody>
-              {standings.map((s, i) => (
-                <tr key={s.userId} className="border-b border-slate-800/60 last:border-0">
-                  <td className="px-4 py-3 text-slate-500">
-                    {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}
-                  </td>
-                  <td className="px-4 py-3 font-medium">{s.displayName}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-emerald-300">{s.points}</td>
-                  <td className="px-4 py-3 text-right">{s.titles}</td>
-                  <td className="px-4 py-3 text-right text-slate-400">{s.events}</td>
-                  <td className="px-4 py-3 text-right text-slate-400 hidden sm:table-cell">
-                    {ordinal(s.bestPlacement)}
-                  </td>
-                  <td className="px-4 py-3 text-right text-slate-400 hidden sm:table-cell">
-                    {s.matchesWon}
-                  </td>
-                </tr>
-              ))}
+              {standings.slice(from, from + PAGE_SIZE).map((s, i) => {
+                const rank = from + i + 1;
+                return (
+                  <tr key={s.userId} className="border-b border-slate-800/60 last:border-0">
+                    <td className="px-4 py-3 text-slate-500">
+                      {rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : rank}
+                    </td>
+                    <td className="px-4 py-3 font-medium">{s.displayName}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-emerald-300">{s.points}</td>
+                    <td className="px-4 py-3 text-right">{s.titles}</td>
+                    <td className="px-4 py-3 text-right text-slate-400">{s.events}</td>
+                    <td className="px-4 py-3 text-right text-slate-400 hidden sm:table-cell">
+                      {ordinal(s.bestPlacement)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-slate-400 hidden sm:table-cell">
+                      {s.matchesWon}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
 
+      <Pagination basePath="/rankings" page={page} totalPages={totalPages} />
+
       <p className="text-xs text-slate-600">
-        Scoring: champion 100 · runner-up 70 · semifinal 40 · quarterfinal 20 · last 16 → 10 · else 5.
+        Scoring: champion 100 · runner-up 70 · semifinal 40 · quarterfinal 20 · last 16 → 10 · else 5,
+        scaled by field size (50% at 6 players, rising to full points at 10+).
       </p>
     </div>
   );
