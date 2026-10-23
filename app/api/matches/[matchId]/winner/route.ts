@@ -3,8 +3,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { assertAdmin, errorResponse, tokenFromRequest, HttpError } from "@/lib/admin";
 import { getCurrentUser } from "@/lib/auth";
 import { applyWinner, correctWinner } from "@/lib/bracket";
-import { computeResults } from "@/lib/rankings";
-import type { Match, Participant } from "@/lib/types";
+import type { Match } from "@/lib/types";
 import { clientIpKey, enforceRateLimits, rateLimitKey } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -99,24 +98,10 @@ export async function POST(req: Request, { params }: { params: { matchId: string
         .from("tournaments")
         .update({ status: "completed", winner_id: champion })
         .eq("id", target.tournament_id);
-
-      // Save standings for the power rankings.
-      const { data: participants } = await supabase
-        .from("participants")
-        .select("*")
-        .eq("tournament_id", target.tournament_id)
-        .returns<Participant[]>();
-      const results = computeResults(participants ?? [], updated, champion).map((r) => ({
-        ...r,
-        tournament_id: target.tournament_id,
-      }));
-      if (results.length > 0) {
-        await supabase.from("results").upsert(results, { onConflict: "tournament_id,user_id" });
-      }
     } else {
       // A correction may have undone a previously-crowned champion. If so, roll
-      // the tournament back to in_progress and drop the now-stale standings so
-      // the power rankings don't keep counting a result that no longer stands.
+      // the tournament back to in_progress so the power rankings stop counting
+      // a result that no longer stands.
       const { data: t } = await supabase
         .from("tournaments")
         .select("status")
@@ -127,7 +112,6 @@ export async function POST(req: Request, { params }: { params: { matchId: string
           .from("tournaments")
           .update({ status: "in_progress", winner_id: null })
           .eq("id", target.tournament_id);
-        await supabase.from("results").delete().eq("tournament_id", target.tournament_id);
       }
     }
 

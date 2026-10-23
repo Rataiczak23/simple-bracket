@@ -56,7 +56,7 @@ export async function DELETE(req: Request, { params }: { params: { id: string } 
     // and in FK-safe order so this works even against a database where the
     // cascade is missing, and so a partial failure is reported rather than
     // silently leaving orphans.
-    for (const table of ["results", "matches", "participants", "tournament_secrets"] as const) {
+    for (const table of ["matches", "participants", "tournament_secrets"] as const) {
       const { error } = await supabase.from(table).delete().eq("tournament_id", params.id);
       if (error) throw new HttpError(500, `Could not delete the tournament's ${table}.`);
     }

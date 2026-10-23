@@ -185,7 +185,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       await rollbackParticipant();
       throw new HttpError(500, "Could not clear the old bracket.");
     }
-    await supabase.from("results").delete().eq("tournament_id", params.id);
 
     const { error: mErr } = await supabase.from("matches").insert(rebuilt);
     if (mErr) {

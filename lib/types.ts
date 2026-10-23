@@ -29,17 +29,6 @@ export interface Participant {
   created_at: string;
 }
 
-/** A saved standing for one player in one completed tournament. */
-export interface Result {
-  id: string;
-  tournament_id: string;
-  user_id: string;
-  placement: number;
-  points: number;
-  matches_won: number;
-  created_at: string;
-}
-
 export interface Match {
   id: string;
   tournament_id: string;

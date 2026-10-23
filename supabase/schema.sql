@@ -8,7 +8,7 @@
 -- Security model:
 --   * Public (anon) clients may SELECT tournaments/participants/matches (read-only bracket view + realtime).
 --   * All writes happen server-side with the service-role key, which BYPASSES RLS.
---   * tournament_secrets, users, sessions, and results have NO anon policies, so
+--   * tournament_secrets, users, and sessions have NO anon policies, so
 --     the anon key can never read admin tokens, password hashes, or session tokens.
 --     The rankings page is rendered server-side with the service-role key.
 
@@ -84,18 +84,6 @@ create table matches (
   created_at            timestamptz not null default now()
 );
 
--- Saved standings, written when a tournament completes -----------------------
-create table results (
-  id            uuid primary key default gen_random_uuid(),
-  tournament_id uuid not null references tournaments(id) on delete cascade,
-  user_id       uuid not null references users(id) on delete cascade,
-  placement     int not null,                -- 1 = champion, 2 = runner-up, ...
-  points        int not null,                -- placement points awarded
-  matches_won   int not null default 0,
-  created_at    timestamptz not null default now(),
-  unique (tournament_id, user_id)
-);
-
 create table rate_limit_hits (
   action       text not null,
   key_hash     text not null,
@@ -107,7 +95,6 @@ create table rate_limit_hits (
 
 create index participants_tournament_idx on participants(tournament_id);
 create index matches_tournament_idx on matches(tournament_id);
-create index results_user_idx on results(user_id);
 create index rate_limit_hits_window_idx on rate_limit_hits(window_start);
 
 create or replace function consume_rate_limit(
@@ -169,7 +156,6 @@ alter table tournaments        enable row level security;
 alter table tournament_secrets enable row level security;
 alter table participants       enable row level security;
 alter table matches            enable row level security;
-alter table results            enable row level security;
 alter table rate_limit_hits    enable row level security;
 
 -- Public read access (no write policies => anon cannot write; service role bypasses RLS)
@@ -177,7 +163,7 @@ create policy "public read tournaments"  on tournaments  for select using (true)
 create policy "public read participants" on participants for select using (true);
 create policy "public read matches"      on matches      for select using (true);
 
--- users, sessions, tournament_secrets, results, rate_limit_hits: intentionally NO policies =>
+-- users, sessions, tournament_secrets, rate_limit_hits: intentionally NO policies =>
 -- unreadable/unwritable by anon. The server uses the service-role key for these.
 
 -- Realtime: broadcast row changes so the public bracket view updates live.

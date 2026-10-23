@@ -1,9 +1,8 @@
 # 🎯 Simple Bracket
 
-Dead-simple **darts** tournament brackets. A competitor to Challonge, stripped down to
-the essentials: create a single- or double-elimination tournament, share a link, let
-signed-in players join, and every result feeds a site-wide power-rankings board. Deploys
-to a free Vercel instance.
+Dead-simple **darts** tournament brackets: create a single- or double-elimination
+tournament, share a link, let signed-in players join, and every result feeds a site-wide
+power-rankings board. Deploys to a free Vercel instance.
 
 - **Accounts** — username/password sign-in (log in by email); players must sign in to play
 - **Single & double elimination** (with automatic byes for non-power-of-2 fields)
@@ -34,10 +33,13 @@ policies, and realtime publication.
 
 > Already running an older version with data? Run
 > [`supabase/migration-auth-rankings.sql`](supabase/migration-auth-rankings.sql) instead —
-> it adds the accounts + rankings tables without dropping your tournaments.
+> it adds the accounts tables without dropping your tournaments.
 >
 > If you already deployed this version before rate limiting was added, also run
 > [`supabase/migration-rate-limits.sql`](supabase/migration-rate-limits.sql).
+>
+> Rankings no longer read the `results` table (they're computed from the brackets), so on
+> an existing deployment you can drop it: `drop table if exists results;`.
 
 ### 3. Configure environment
 Copy `.env.local.example` to `.env.local` and fill in from **Project Settings → API**:
@@ -68,10 +70,10 @@ Open http://localhost:3000.
 |------|-----|------|
 | `/` | anyone | Create a tournament (requires sign-in) |
 | `/signup`, `/login` | anyone | Account: name, display name, email, password |
-| `/rankings` | public | Power rankings — placement points across all tournaments |
+| `/rankings` | public | Power rankings — placement points across all tournaments, 10 per page |
 | `/t/[id]` | public | Live bracket, player list, self-join (signed in, while open) |
 | `/t/[id]/manage#token=…` | host | Add players by email, start, add late players, report winners, reset |
-| `/history` | public | Every tournament, newest first (owner also sees delete controls) |
+| `/history` | public | Every tournament, newest first, 10 per page (owner also sees delete controls) |
 
 **Auth model.** Accounts live in a `users` table (passwords hashed with Node's `scrypt`);
 sign-in is email + password, with an opaque httpOnly session cookie backed by a `sessions`
@@ -79,7 +81,7 @@ table. No Supabase Auth, no OAuth — one username/password method. The public b
 stays open to everyone; creating and joining require an account so results can be linked.
 
 **Owner deletes.** One account — the email in `OWNER_EMAIL` — can permanently delete a
-tournament along with its participants, matches, saved results, and admin token. It is an
+tournament along with its participants, matches, and admin token. It is an
 env var rather than a database flag so the privilege can't be granted through the app, and
 it fails closed when unset. Only `setup` and `in_progress` tournaments can be deleted;
 completed ones are the record the power rankings are built from. Hosts and admin-token
@@ -94,10 +96,14 @@ rewrites who plays those later matches. When no spot is left — a full power-of
 every bye already played on — the panel switches to **Add & rebuild**, which regenerates
 the bracket with the fuller field and clears all results (it asks first).
 
-**Rankings.** When a tournament completes, each player's placement and points are saved to
-a `results` table (champion 100, runner-up 70, semifinal 40, quarterfinal 20, last-16 10,
-else 5). `/rankings` aggregates totals across all events. Resetting a bracket clears its
-saved results.
+**Rankings.** `/rankings` scores every completed tournament from its bracket on each load
+and totals the points across events. Placement is the round a player was knocked out in
+(double elim: their losers-bracket or grand-final loss); points are champion 100, runner-up
+70, semifinal 40, quarterfinal 20, last-16 10, else 5, scaled by field size (50% at 6
+players, rising on a log scale to full points at 10+) and rounded to the nearest 5. Ties
+on points go to best finish, then match wins. Nothing is stored, so a change to the scoring
+in `lib/rankings.ts` applies to every past tournament too. Resetting a bracket takes it out
+of the rankings until it completes again. Scoring checks: `npx tsx lib/rankings.test.mjs`.
 
 The bracket engine lives in [`lib/bracket.ts`](lib/bracket.ts) — pure functions for
 generation and advancement, with a fixpoint that propagates byes through both the winners
